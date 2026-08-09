@@ -1,0 +1,158 @@
+networks:
+  # player_vm1 and player_vm2 never share a network with each other, only
+  # (multi-homed) with kiwix1/platform/harness. Docker doesn't route between
+  # a container's own attached networks unless that container explicitly
+  # forwards packets, and neither kiwix nor platform/harness does, so this
+  # genuinely blocks a path between the two player VMs, not just discourages
+  # one. `internal: true` also cuts off all internet egress: Kiwix over HTTP
+  # and the platform over distribution, nothing else. player1/player2 (the
+  # separate dev-iteration containers, never used in a graded run) stay on
+  # the plain default network, untouched.
+  player1_net:
+    internal: true
+  player2_net:
+    internal: true
+
+services:
+  kiwix1:
+    image: ghcr.io/kiwix/kiwix-serve:latest
+    volumes:
+      - ./.data/zim:/data:ro
+    command: ["/data/${KIWIX_BOOK:-wikipedia_en_all_nopic}.zim"]
+    ports:
+      - "8080:8080"
+    networks:
+      - default
+      - player1_net
+      - player2_net
+
+  platform:
+    build:
+      context: ./platform
+      # Some networks (this one included) filter DNS on NAT'd/bridge
+      # traffic; build steps that need the internet (deps.get, asset
+      # installers) share the host's network stack instead. Runtime
+      # container-to-container DNS (below) is unaffected, since that's
+      # Docker's own embedded resolver, not an external lookup.
+      network: host
+    depends_on:
+      - kiwix1
+    environment:
+      NODE_NAME: platform@platform
+      ERL_COOKIE: wikirace
+      KIWIX_BASE_URL: http://kiwix1:8080
+      KIWIX_BOOK: ${KIWIX_BOOK:-wikipedia_en_all_nopic}
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./platform:/app
+      - /app/_build
+      - /app/deps
+    networks:
+      - default
+      - player1_net
+      - player2_net
+
+  # Both player services build from and mount the same source tree
+  # (player/), one starting point for two independent containers/nodes.
+  # Give one side a handicap via a runtime config knob your crawler
+  # reads, not a second copy of the code, same as RUNNING.md's manual flow.
+  player1:
+    build:
+      context: ./player
+      network: host
+    depends_on:
+      - platform
+    environment:
+      NODE_NAME: player1@player1
+      ERL_COOKIE: wikirace
+      PLATFORM_NODE: platform@platform
+      START_HARNESS: "false"
+    volumes:
+      - ./player:/app
+      - /app/_build
+      - /app/deps
+
+  player2:
+    build:
+      context: ./player
+      network: host
+    depends_on:
+      - platform
+    environment:
+      NODE_NAME: player2@player2
+      ERL_COOKIE: wikirace
+      PLATFORM_NODE: platform@platform
+      START_HARNESS: "false"
+    volumes:
+      - ./player:/app
+      - /app/_build
+      - /app/deps
+
+  # A real sshd the platform genuinely connects to, uploads a release to,
+  # and starts over Erlang's :ssh, not a mock. Distinct from player1/player2
+  # above, which are for iterating on a
+  # crawler directly; these simulate the bare, no-Elixir-installed player VM
+  # a real release gets shipped to. `deploy/keys/id_ed25519.pub` is generated
+  # by `make deploy-keys`, never committed.
+  player_vm1:
+    profiles: ["deploy"]
+    build:
+      context: ./deploy/vm
+      network: host
+    volumes:
+      - ./deploy/keys/id_ed25519.pub:/home/deploy/.ssh/authorized_keys:ro
+    networks:
+      - player1_net
+    # A deployed release can't write anywhere on this filesystem except its
+    # own scratch space. Everything else, including the image itself, is
+    # read only. /run and /tmp are sshd's and run_erl's own scratch needs;
+    # /home/deploy/releases is where a deploy actually unpacks and runs.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      # Docker's tmpfs mounts default to noexec; the release itself has to
+      # run from here, so that default is deliberately overridden for this
+      # one path. Everywhere else on the filesystem stays noexec and
+      # read-only.
+      - /home/deploy/releases:exec,size=256m
+    mem_limit: 512m
+    cpus: 1.0
+
+  player_vm2:
+    profiles: ["deploy"]
+    build:
+      context: ./deploy/vm
+      network: host
+    volumes:
+      - ./deploy/keys/id_ed25519.pub:/home/deploy/.ssh/authorized_keys:ro
+    networks:
+      - player2_net
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+      # Docker's tmpfs mounts default to noexec; the release itself has to
+      # run from here, so that default is deliberately overridden for this
+      # one path. Everywhere else on the filesystem stays noexec and
+      # read-only.
+      - /home/deploy/releases:exec,size=256m
+    mem_limit: 512m
+    cpus: 1.0
+
+  # Builds a group's release inside a container pinned to the exact image
+  # player_vm runs on, so the result is binary-compatible regardless of what
+  # OS the platform itself happens to run on. Never started by `up`, only
+  # invoked with `docker compose run --rm release_builder ...`.
+  release_builder:
+    build:
+      context: ./deploy/vm
+      network: host
+    # `mix deps.get` needs real internet access, which the default bridge
+    # network's DNS filtering blocks on this network (same reason platform's
+    # build step uses host networking). This applies at `run` time too,
+    # not just build.
+    network_mode: host
+    profiles: ["tools"]
