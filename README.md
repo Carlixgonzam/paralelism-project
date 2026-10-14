@@ -69,6 +69,36 @@ found so far, and elapsed time. The race ends when both crawlers find a path or 
 time limit runs out, and the next click advances to the next match. Nothing gets
 redeployed in between.
 
+## The platform
+
+These screenshots come from a demo race on the local setup, with two scripted crawlers
+standing in for real groups.
+
+`/admin` is where the professor picks the article pair for the round and starts each
+match.
+
+![Race control on /admin](docs/screenshots/admin.png)
+
+`/schedule` shows the matches of the current round and which one is next.
+
+![The schedule of the current round](docs/screenshots/schedule.png)
+
+During a race, the dashboard at `/` shows both crawlers side by side: frontier size,
+pages visited, and the article each one is reading right now.
+
+![A race in progress](docs/screenshots/race-running.png)
+
+When a crawler reports a path, the harness verifies it link by link before it counts.
+Once the race ends, each side shows its hops, its time, its scheduler use, its score,
+and the verified path. Here Group B was faster, but Group A found the shorter path and
+wins on score.
+
+![A finished race with both paths verified](docs/screenshots/race-finished.png)
+
+`/standings` ranks the groups across the tournament and shows how the score is built.
+
+![Standings and the score formula](docs/screenshots/standings.png)
+
 ## Grading
 
 Matches are 1v1. Each crawler gets a single score built from four parts: whether it
