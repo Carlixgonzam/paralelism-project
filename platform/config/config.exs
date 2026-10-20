@@ -97,7 +97,7 @@ config :wiki_race_platform, :tournament,
 
 # How Deploy.Server reaches a player VM: the dev keypair `make deploy-keys`
 # generates for the docker-simulated player_vm1/player_vm2, resolved relative
-# to wherever `mix` is running from (platform/, per CLAUDE.md). Point this at
+# to wherever `mix` is running from (platform/, per RUNNING.md). Point this at
 # a real per-deployment key once real player VMs exist.
 config :wiki_race_platform, :deploy,
   ssh_user: "deploy",

@@ -23,7 +23,7 @@ Dashboard: <http://localhost:4000>. Admin: <http://localhost:4000/admin>.
 
 The default is the full encyclopedia (`wikipedia_en_all_nopic`, ~52 GB),
 so local content matches competition day exactly. `make up` fetches it
-automatically the first time; if you already have a copy, place it at
+automatically the first time. If you already have a copy, place it at
 `.data/zim/wikipedia_en_all_nopic.zim` (exact name, no date suffix) and
 it'll be reused.
 
@@ -38,8 +38,8 @@ make up KIWIX_BOOK=wikipedia_en_top_nopic   # real linking, ~2.2 GB
 snapshot is built, so it's good for checking the wiring works but not for
 testing real crawler search logic. `wikipedia_en_top_nopic` has real
 inter-article linking and is a much faster download than the full
-snapshot. Kiwix reads whichever book you picked; the platform is told the
-same book automatically.
+snapshot. Kiwix reads whichever book you picked, and the platform is told
+the same book automatically.
 
 ## 2. Give a player a crawler
 
@@ -68,10 +68,10 @@ is bind-mounted, not baked into the image.
 
 Open `/admin`. It shows the next match, `player1` vs `player2`, since the
 dev config's tournament roster is exactly those two names (see
-`config/dev.exs` and `platform/priv/groups.exs`). You can pick a
-different article pair from the dropdown; the time limit and poll
-interval are not something you pick per race, they're fixed by
-`Tournament.Server`.
+`platform/config/dev.exs` and `platform/priv/groups.exs`). You can pick
+a different article pair from the dropdown. The time limit (120 seconds)
+and the poll interval (250 ms) are not something you pick per race. They
+are fixed in `WikiRacePlatform.Tournament.Server`.
 
 Click "Start race". With an untouched checkout, both sides raise the
 same way, so the race never actually starts: `/admin` shows an inline
@@ -101,8 +101,8 @@ A random pair could be many hops apart or not connected at all, which
 would make wait times unpredictable, so pairs are picked and vetted
 ahead of time instead. A tournament's rounds use a configured sequence
 of pairs from that same pool (`round_pairs` in
-`platform/config/config.exs`); a manual race picks one from a dropdown
-on `/admin`.
+`platform/config/config.exs`). The dropdown on `/admin` overrides the
+pair for the current round only.
 
 After editing the pool, check it against the running Kiwix instance,
 from `platform/`:
@@ -118,13 +118,15 @@ WikiRacePlatform.Articles.check_pairs()
 ## Deploying a release
 
 `/admin` starts a race by connecting to a player node that's already
-running. `/admin/deploy` is the step before that: building a group's
-`mix release` and shipping it to a player VM over Erlang's own
+running. Deploying is the step before that: building a group's `mix
+release` and shipping it to a player VM over Erlang's own
 `:ssh`/`:ssh_sftp`, then starting it and confirming it joins the
-cluster. Never a shelled-out `ssh` binary.
+cluster. Never a shelled-out `ssh` binary. Deployment runs from the
+terminal through `mix wiki_race.deploy`, `mix wiki_race.start` and `mix
+wiki_race.stop`. There is no web UI for it.
 
 This is a once-per-group setup step, not a once-per-match one. Deploy and
-start every group's release before the tournament starts; each release
+start every group's release before the tournament starts. Each release
 then stays running and connected for every match it plays. Once every
 group is connected, running the whole tournament is just clicking
 through matches on `/admin`: it looks up each match's two groups by name
@@ -135,7 +137,7 @@ There's no real player VM to deploy to yet (the GitHub Releases pull and
 the actual VM provisioning aren't built), so docker-compose stands in
 for a real one: `player_vm1`/`player_vm2` run actual `sshd`, so the
 deploy code's `:ssh` traffic is genuine, not mocked. They don't start
-with plain `make up`; bring one up explicitly:
+with plain `make up`. Bring one up explicitly:
 
 ```
 make deploy-keys
@@ -151,14 +153,24 @@ Groups are listed in `platform/priv/groups.exs`, the same
 editable-without-a-restart pattern as `platform/priv/article_pairs.exs`.
 It ships with one entry, "Local fixture," pointing at the in-repo
 `player/` skeleton. That's enough to exercise the whole pipeline without
-a real group's checkout. On `/admin/deploy`, fill in the simulated VM's
-address and a node name (e.g. host `player_vm1`, node
-`groupa@player_vm1` if the platform itself runs inside compose reaching
-it by service name, or the container's IP and a matching IP-based node
-name if running the platform on the host, see the note on distribution
-modes below) and click Deploy. The build log streams live; once it says
-`stopped`, the release is on the VM but not running yet. Start joins it
-to the cluster, Stop takes it back down.
+a real group's checkout. From `platform/`, deploy it to the simulated
+VM and then start it:
+
+```
+mix wiki_race.deploy "Local fixture" --host HOST --node NODE
+mix wiki_race.start "Local fixture"
+```
+
+`HOST` is the simulated VM's address and `NODE` is the node name the
+release runs under (e.g. host `player_vm1`, node `groupa@player_vm1` if
+the platform itself runs inside compose reaching it by service name, or
+the container's IP and a matching IP-based node name if running the
+platform on the host, see the note on distribution modes below). Both
+default to the group's `host`/`node` fields in `platform/priv/groups.exs`.
+`mix wiki_race.deploy` streams the build log. Once it reports the group
+as deployed, the release is on the VM but not running yet. `mix
+wiki_race.start` joins it to the cluster, and `mix wiki_race.stop` takes
+it back down.
 
 **Long names, not short.** Every other node in this project (`platform`,
 `player1`, `player2`) uses `--sname` with docker-internal service-name
@@ -190,7 +202,7 @@ the direct mapping when one exists.
 `make test-deploy` runs the real integration suite (a real release
 build, a real SSH round trip, a real cluster join) against `player_vm1`.
 See `platform/test/wiki_race_platform/deploy/integration_test.exs`.
-Plain `mix test` stays Docker-free; anything tagged `:integration` is
+Plain `mix test` stays Docker-free. Anything tagged `:integration` is
 excluded by default.
 
 ## Security hardening
@@ -270,7 +282,7 @@ the docker-simulated setup.
 | `PORT` | `4000` | HTTP port |
 | `WIKI_RACE_DATA_DIR` | `priv/data` | Where finished race results are appended |
 
-`docker-compose.yml` sets sensible defaults for all of these; you only
+`docker-compose.yml` sets sensible defaults for all of these. You only
 need them by hand for the appendix below.
 
 ## Appendix: running without docker-compose
@@ -290,8 +302,8 @@ docker run -d --name wikirace-kiwix -p 8080:8080 \
   ghcr.io/kiwix/kiwix-serve:latest /data/wikipedia_en_all_nopic.zim
 ```
 
-(run from the repo root; adjust the path and filename to whichever book
-you fetched). Check it works: `curl -sI http://localhost:8080/` should
+(run from the repo root, and adjust the path and filename to whichever
+book you fetched). Check it works: `curl -sI http://localhost:8080/` should
 return 200.
 
 ### The platform node

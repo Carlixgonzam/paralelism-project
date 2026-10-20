@@ -2,9 +2,9 @@ defmodule WikiRacePlatform.Race.Config do
   @moduledoc """
   Settings for a single race, validated before anything runs on a player node.
 
-  There are no defaults for the timings on purpose. The professor sets both the
-  time limit and the poll interval per race in the admin interface, so a demo
-  race and a graded race can use very different numbers without a code change.
+  There are no defaults for the timings on purpose. The caller sets both the
+  time limit and the poll interval. Tournament races take them from
+  `WikiRacePlatform.Tournament.Server`, which fixes them at 120 seconds and 250ms.
   """
 
   @type player_spec :: %{node: node(), label: String.t(), module: module() | nil}
