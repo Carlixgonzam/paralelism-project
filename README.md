@@ -38,8 +38,8 @@ Four machines, on a private network, each with one job:
 
 Player VMs connect to the platform over Erlang distribution, the same way any two
 BEAM nodes talk to each other. The platform VM connects to each player VM over SSH
-only to deploy and start the release; once it is running, all further communication
-is the Erlang connection.
+only to deploy and start the release. Once the release is running, all further
+communication is the Erlang connection.
 
 ## Student deliverable
 
@@ -48,7 +48,10 @@ implement a behavior with two functions: `start(start_url, target_url)`, which
 returns a pid, and `status(pid)`, which returns the crawler's current state.
 Students may use Req for HTTP and Floki for HTML parsing. All concurrency,
 distribution, and coordination must be built with standard OTP: GenServers, dynamic
-supervisors, ETS, and Erlang distribution. No other libraries for that part. 
+supervisors, ETS, and Erlang distribution. No other libraries for that part.
+The platform builds the deliverable with `MIX_ENV=prod mix release`, so that command
+must succeed on a fresh clone of the group's tag. `player/README.md` is the starting
+point and lists what to implement.
 
 ## Competition flow
 
@@ -69,14 +72,49 @@ found so far, and elapsed time. The race ends when both crawlers find a path or 
 time limit runs out, and the next click advances to the next match. Nothing gets
 redeployed in between.
 
+## The platform
+
+These screenshots come from a demo race on the local setup, with two scripted crawlers
+standing in for real groups.
+
+`/admin` is where the professor picks the article pair for the round and starts each
+match.
+
+![Race control on /admin](docs/screenshots/admin.png)
+
+`/schedule` shows the matches of the current round and which one is next.
+
+![The schedule of the current round](docs/screenshots/schedule.png)
+
+During a race, the dashboard at `/` shows both crawlers side by side: frontier size,
+pages visited, and the article each one is reading right now.
+
+![A race in progress](docs/screenshots/race-running.png)
+
+When a crawler reports a path, the harness verifies it link by link before it counts.
+Once the race ends, each side shows its hops, its time, its scheduler use, its score,
+and the verified path. Here Group B was faster, but Group A found the shorter path and
+wins on score.
+
+![A finished race with both paths verified](docs/screenshots/race-finished.png)
+
+`/standings` ranks the groups across the tournament and shows how the score is built.
+
+![Standings and the score formula](docs/screenshots/standings.png)
+
 ## Grading
 
 Matches are 1v1. Each crawler gets a single score built from four parts: whether it
 found a valid path, how its path length compares to the other crawler's, how its
 time compares, and how well it used its schedulers. Highest score wins. Reporting a
-path that turns out to be wrong scores a flat -1.0, no matter the rest. Groups are
-paired round-robin across the semester, so every group plays every other group. See
+path that turns out to be wrong scores a flat -1.0, no matter the rest. See
 `SCORING.md` for the exact formula.
+
+The tournament has four Swiss rounds. Each round pairs groups that are close in the
+standings, ranked by wins and then by total score, and never repeats a pairing that
+has already been played. When the number of groups is odd, one group gets a bye in
+each round. A bye is a scored solo time trial, not a free win. The pairing generator
+and the number of rounds are set in `platform/config/config.exs`.
 
 ## Running it locally
 
@@ -90,11 +128,11 @@ all four machines above as four containers on your own laptop:
 | `player1`, `player2`   | the two Player VMs   |
 
 This is not a simplified copy. `platform` runs the exact same Phoenix app, against
-the exact same Wikipedia snapshot, that runs on competition day. The only piece
-missing locally is the SSH deploy step, since there is no real VM to deploy to yet.
-Instead, `player1` and `player2` just build and run your `player/` checkout
-directly. So if your crawler works here, it works on competition day, full stop.
-Full setup and troubleshooting is in `RUNNING.md`; the short version:
+the exact same Wikipedia snapshot, that runs on competition day. The default local
+loop skips the SSH deploy step. Instead, `player1` and `player2` just build and run
+your `player/` checkout directly. So if your crawler works here, it works on
+competition day, full stop. Full setup and troubleshooting is in `RUNNING.md`. The
+short version:
 
 1. `make up` starts all four containers, downloading the Wikipedia snapshot first
    if you don't already have it (it's large, but smaller test snapshots are also
@@ -126,5 +164,5 @@ starting a race.
 
 Phoenix LiveView for the harness and dashboard. Erlang distribution between nodes.
 Req and Floki are the only libraries students may add. Kiwix serves Wikipedia.
-Deployment uses Erlang's own `:ssh` module. Releases come from GitHub Releases.
-Local development uses Docker Compose.
+Deployment uses Erlang's own `:ssh` module. Each group's release is built from a
+tagged commit of the group's GitHub repository. Local development uses Docker Compose.
