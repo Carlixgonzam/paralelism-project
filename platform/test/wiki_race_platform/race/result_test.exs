@@ -12,16 +12,17 @@ defmodule WikiRacePlatform.Race.ResultTest do
       state: Keyword.get(opts, :state, :found),
       best_path: Keyword.get(opts, :path),
       best_elapsed_ms: Keyword.get(opts, :elapsed),
+      first_elapsed_ms: Keyword.get(opts, :first, Keyword.get(opts, :elapsed)),
       rejected: Keyword.get(opts, :rejected, [])
     }
   end
 
   defp path(length), do: Enum.map(1..length, &"http://kiwix.test/#{&1}")
 
-  test "the shorter path wins, even when it arrived later" do
+  test "with equal times, the shorter path wins" do
     players = [
-      player("A", path: path(5), elapsed: 100),
-      player("B", path: path(3), elapsed: 900)
+      player("A", path: path(5), elapsed: 500),
+      player("B", path: path(3), elapsed: 500)
     ]
 
     result = Result.build(players, :all_settled, 1_000)
@@ -29,6 +30,51 @@ defmodule WikiRacePlatform.Race.ResultTest do
     assert result.winner.label == "B"
     assert result.decided_by == :score
     assert Enum.map(result.ranking, & &1.label) == ["B", "A"]
+  end
+
+  test "the first path wins over a shorter one that arrived later" do
+    players = [
+      player("A", path: path(5), elapsed: 100),
+      player("B", path: path(3), elapsed: 900)
+    ]
+
+    result = Result.build(players, :all_settled, 1_000)
+
+    # A: 0.4 + 0.15 (first) + 0.2*(3/5) + 0.15*1.0
+    # B: 0.4 + 0.0 + 0.2*1.0 + 0.15*(100/900)
+    scored = Map.new(result.ranking, &{&1.label, &1.score})
+    assert_in_delta scored["A"], 0.4 + 0.15 + 0.12 + 0.15, 0.0001
+    assert_in_delta scored["B"], 0.4 + 0.2 + 0.15 * 100 / 900, 0.0001
+    assert result.winner.label == "A"
+  end
+
+  test "first goes to the earliest verified path, not to the best one" do
+    players = [
+      player("A", path: path(3), elapsed: 900, first: 100),
+      player("B", path: path(3), elapsed: 400)
+    ]
+
+    result = Result.build(players, :all_settled, 1_000)
+
+    # A: 0.4 + 0.15 (first) + 0.2 + 0.15*(400/900)
+    # B: 0.4 + 0.0 + 0.2 + 0.15*1.0
+    scored = Map.new(result.ranking, &{&1.label, &1.score})
+    assert_in_delta scored["A"], 0.4 + 0.15 + 0.2 + 0.15 * 400 / 900, 0.0001
+    assert_in_delta scored["B"], 0.4 + 0.2 + 0.15, 0.0001
+  end
+
+  test "a crawler that reported a false path cannot take first from an honest one" do
+    players = [
+      player("A", path: path(3), elapsed: 100, rejected: [{path(2), "no such link"}]),
+      player("B", path: path(3), elapsed: 400)
+    ]
+
+    result = Result.build(players, :all_settled, 1_000)
+
+    scored = Map.new(result.ranking, &{&1.label, &1.score})
+    assert scored["A"] == -1.0
+    # B: 0.4 + 0.15 (first among honest crawlers) + 0.2 + 0.15*(100/400)
+    assert_in_delta scored["B"], 0.4 + 0.15 + 0.2 + 0.15 * 0.25, 0.0001
   end
 
   test "equal path lengths are broken by wall-clock time" do
@@ -44,7 +90,7 @@ defmodule WikiRacePlatform.Race.ResultTest do
     assert Result.summary(result) =~ "wins with a path"
   end
 
-  test "the score is a blend of found/hops/time/utilization, higher wins" do
+  test "the score is a blend of found/first/hops/time/utilization, higher wins" do
     players = [
       player("A", path: path(4), elapsed: 800),
       player("B", path: path(4), elapsed: 200)
@@ -55,22 +101,20 @@ defmodule WikiRacePlatform.Race.ResultTest do
 
     [winner, loser] = result.ranking
     assert winner.label == "B"
-    # B: 0.5*1.0 (found) + 0.3*1.0 (best hops) + 0.1*1.0 (best time) + 0.1*0.8 (util)
-    assert_in_delta winner.score, 0.5 + 0.3 + 0.1 + 0.08, 0.0001
-    # A: 0.5*1.0 (found) + 0.3*1.0 (same hops) + 0.1*(200/800) (slower) + 0.1*0.2 (util)
-    assert_in_delta loser.score, 0.5 + 0.3 + 0.1 * 0.25 + 0.1 * 0.2, 0.0001
+    # B: 0.4 (found) + 0.15 (first) + 0.2 (best hops) + 0.15 (best time) + 0.1*0.8 (util)
+    assert_in_delta winner.score, 0.4 + 0.15 + 0.2 + 0.15 + 0.08, 0.0001
+    # A: 0.4 (found) + 0.0 (not first) + 0.2 (same hops) + 0.15*(200/800) + 0.1*0.2 (util)
+    assert_in_delta loser.score, 0.4 + 0.2 + 0.15 * 0.25 + 0.1 * 0.2, 0.0001
   end
 
   test "score weights come from config, not a hardcoded pass-through" do
+    original = Application.fetch_env!(:wiki_race_platform, :scoring)
+
     Application.put_env(:wiki_race_platform, :scoring,
-      weights: [found: 0.0, hops: 0.0, time: 0.0, utilization: 1.0]
+      weights: [found: 0.0, first: 0.0, hops: 0.0, time: 0.0, utilization: 1.0]
     )
 
-    on_exit(fn ->
-      Application.put_env(:wiki_race_platform, :scoring,
-        weights: [found: 0.5, hops: 0.3, time: 0.1, utilization: 0.1]
-      )
-    end)
+    on_exit(fn -> Application.put_env(:wiki_race_platform, :scoring, original) end)
 
     players = [
       player("A", path: path(4), elapsed: 800),

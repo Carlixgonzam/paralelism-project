@@ -2,7 +2,8 @@
 
 Phoenix app for the WikiRace competition: harness, admin UI, dashboard.
 See the repo root README.md and SCORING.md for what the project is and how
-it's scored. See `../RUNNING.md` for how to run it.
+it's scored. See `../RUNNING.md` for how to run it locally, and `../DEPLOY.md` for how to
+run a tournament.
 
 ## Definitions
 

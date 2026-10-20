@@ -7,8 +7,8 @@ defmodule WikiRacePlatform.Deploy.Release do
 
   Shells out to `docker compose run`. It never assumes the platform process
   is itself containerized: this runs the platform on the host (or wherever
-  the repo checkout lives), the same "manual" mode `RUNNING.md` documents
-  as the appendix to the compose flow. Running the platform itself inside
+  the repo checkout lives), as in "Running without Docker Compose" in
+  `DEPLOY.md`. Running the platform itself inside
   the `platform` compose service, and reaching `docker`/the group checkouts
   from in there, is future work (it needs the docker socket and the repo
   bind-mounted in). Not attempted here.
