@@ -37,6 +37,10 @@ your crawler must build them with the tools the course teaches.
 
 ## How a competition works
 
+Each group ships their crawler as an Elixir OTP application on GitHub. It must
+implement a behavior with two functions: `start(start_url, target_url)`, which
+returns a pid, and `status(pid)`, which returns the crawler's current state.
+
 On competition day there are four machines on a private network:
 
 - **Wikipedia VM.** Runs Kiwix, which serves an offline copy of English Wikipedia.

@@ -33,7 +33,7 @@ Files to edit before running a real tournament:
 - `lib/wiki_race/`: the shared contract between the platform and every crawler, student or
   reference. It's what lets the platform treat any crawler the exact same way, regardless
   of who wrote it:
-  - `crawler.ex`: the behaviour a crawler must implement to start and be polled.
+  - `crawler.ex`: the behavior a crawler must implement to start and be polled.
   - `status.ex`: the shape of a crawler's progress snapshot.
   - `harness.ex`: how a crawler reports a path it found.
 
