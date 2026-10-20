@@ -3,8 +3,9 @@ defmodule WikiRacePlatform.Race.Player do
   Everything the harness knows about one competitor during a race.
 
   `status` is the last snapshot polled out of the crawler and only drives the
-  dashboard. Scoring uses `best_path` and `best_elapsed_ms`, which are set from
-  verified path reports, never from a status snapshot alone.
+  dashboard. Scoring uses `best_path`, `best_elapsed_ms` and `first_elapsed_ms`,
+  which are set from verified paths only. `first_elapsed_ms` is the arrival time
+  of the first verified path, even when a shorter path replaces it later.
   """
 
   alias WikiRace.Status
@@ -21,6 +22,7 @@ defmodule WikiRacePlatform.Race.Player do
           status: Status.t(),
           best_path: Status.path() | nil,
           best_elapsed_ms: non_neg_integer() | nil,
+          first_elapsed_ms: non_neg_integer() | nil,
           rejected: [{Status.path(), String.t()}],
           error: String.t() | nil
         }
@@ -34,6 +36,7 @@ defmodule WikiRacePlatform.Race.Player do
             status: %Status{},
             best_path: nil,
             best_elapsed_ms: nil,
+            first_elapsed_ms: nil,
             rejected: [],
             error: nil
 
@@ -53,9 +56,20 @@ defmodule WikiRacePlatform.Race.Player do
   def live?(%__MODULE__{pid: pid, state: state}),
     do: is_pid(pid) and state not in [:down, :error]
 
-  @doc "Records a verified path, keeping it only if it beats what we had."
+  @doc """
+  Records a verified path, keeping it only if it beats what we had.
+
+  Every verified path counts for `first_elapsed_ms`, even one that is not
+  kept, since verifications can finish in a different order than the
+  reports arrived.
+  """
   @spec put_path(t(), Status.path(), non_neg_integer()) :: t()
   def put_path(%__MODULE__{} = player, path, elapsed_ms) do
+    player = %{
+      player
+      | first_elapsed_ms: min(player.first_elapsed_ms || elapsed_ms, elapsed_ms)
+    }
+
     if better?(player, path) do
       %{player | best_path: path, best_elapsed_ms: elapsed_ms, state: :found}
     else

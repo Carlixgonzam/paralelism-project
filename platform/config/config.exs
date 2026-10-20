@@ -65,9 +65,9 @@ config :wiki_race_platform, :kiwix,
 config :wiki_race_platform, :tournament_store, data_dir: "priv/data"
 
 # How races are scored. Weights sum to how much each axis counts.
-# Published to students before they write anything.
+# Published to students before they write anything (see SCORING.md).
 config :wiki_race_platform, :scoring,
-  weights: [found: 0.5, hops: 0.3, time: 0.1, utilization: 0.1]
+  weights: [found: 0.4, first: 0.15, hops: 0.2, time: 0.15, utilization: 0.1]
 
 # The tournament roster. Kept separate from priv/groups.exs's deploy
 # manifest (name, repo, tag, commit SHA, checkout path), since
@@ -97,7 +97,7 @@ config :wiki_race_platform, :tournament,
 
 # How Deploy.Server reaches a player VM: the dev keypair `make deploy-keys`
 # generates for the docker-simulated player_vm1/player_vm2, resolved relative
-# to wherever `mix` is running from (platform/, per RUNNING.md). Point this at
+# to wherever `mix` is running from (platform/, per DEPLOY.md). Point this at
 # a real per-deployment key once real player VMs exist.
 config :wiki_race_platform, :deploy,
   ssh_user: "deploy",

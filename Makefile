@@ -1,24 +1,21 @@
-.PHONY: fetch-zim up down logs deploy-keys dist-certs test-deploy
+.PHONY: fetch-zim images up down build logs deploy-keys deploy-images dist-certs test-deploy
 
-# Which ZIM to serve locally. Matches the KIWIX_BOOK env var the platform
-# reads, so the two stay in sync without either side hardcoding the other.
+# The Wikipedia snapshot to serve. The platform reads the same KIWIX_BOOK.
 #
-# wikipedia_en_100_nopic (~15 MB) has almost no real inter-article links.
-# Most link targets aren't in its ~5,200-entry archive, so they get pruned
-# during ZIM generation. wikipedia_en_top_nopic (~2.2 GB) has real linking
-# (928K entries) and is a fast stand-in; wikipedia_en_all_nopic (~52 GB) is
-# the full encyclopedia and the default, for content parity with competition
-# day. The tiny book is still there for a fast smoke test that the wiring
-# works, not for testing crawler search logic.
-KIWIX_BOOK ?= wikipedia_en_all_nopic
+# wikipedia_en_top_nopic (~2.2 GB, 928K entries) has real links between
+#   articles. It is the default for local work.
+# wikipedia_en_all_nopic (~52 GB) is the full encyclopedia, used on
+#   competition day.
+# wikipedia_en_100_nopic (~15 MB) has almost no links between articles. It
+#   only checks that the setup works.
+KIWIX_BOOK ?= wikipedia_en_top_nopic
 
 ZIM_DIR := .data/zim
 ZIM_PATH := $(ZIM_DIR)/$(KIWIX_BOOK).zim
 
-# The upstream mirror publishes ZIMs with a build date in the filename, which
-# changes over time. Pin the dated source URL per book here; the fetched file
-# is saved WITHOUT the date (see ZIM_PATH above) so docker-compose and
-# KIWIX_BOOK config never need to know the current date, only the book name.
+# The download site puts a date in each file name. The dated name of each book
+# is pinned here. The file is saved without the date (see ZIM_PATH), so the
+# rest of the setup only needs the book name.
 ifeq ($(KIWIX_BOOK),wikipedia_en_100_nopic)
 ZIM_SOURCE := wikipedia_en_100_nopic_2026-07.zim
 else ifeq ($(KIWIX_BOOK),wikipedia_en_top_nopic)
@@ -49,20 +46,30 @@ fetch-zim:
 		echo "Saved $(ZIM_PATH)"; \
 	fi
 
-up: fetch-zim
+# Builds the images through bake, since `docker compose build` cannot grant
+# the network.host privilege the builds need (see docker-compose.yml). player1
+# and player2 share one image, so building player1 is enough.
+BAKE := docker buildx bake --allow=network.host -f docker-compose.yml
+
+images:
+	$(BAKE) platform player1
+
+up: fetch-zim images
 	KIWIX_BOOK=$(KIWIX_BOOK) docker compose up -d
 
 down:
 	docker compose down
 
+# Rebuilds the images from scratch, without the build cache.
 build: fetch-zim
-	KIWIX_BOOK=$(KIWIX_BOOK) docker compose up --build -d
+	$(BAKE) --no-cache platform player1
+	KIWIX_BOOK=$(KIWIX_BOOK) docker compose up -d
 
 logs:
 	docker compose logs -f
 
-# A dev-only keypair the platform uses to SSH into the simulated player VMs
-# (player_vm1/player_vm2). Never committed; regenerate per checkout.
+# Professor only (see DEPLOY.md). A dev keypair the platform uses to log in to
+# the simulated player VMs (player_vm1, player_vm2). Never committed.
 DEPLOY_KEY := deploy/keys/id_ed25519
 
 deploy-keys:
@@ -73,12 +80,14 @@ deploy-keys:
 		ssh-keygen -t ed25519 -N "" -C "wikirace-deploy-dev" -f "$(DEPLOY_KEY)"; \
 	fi
 
-# TLS distribution: a dev-only CA plus one certificate per role (web,
-# harness, player), all signed by it. Never committed, regenerated per
-# checkout. A node started without a certificate this CA signed can't join
-# distribution at all, not just fail a cookie check. See RUNNING.md for how
-# Deploy.Server wires this into a real deploy when
-# :wiki_race_platform, :deploy, :tls is enabled.
+# Professor only (see DEPLOY.md). The image of the simulated player VMs, also
+# used by release_builder.
+deploy-images:
+	$(BAKE) player_vm1
+
+# Professor only (see DEPLOY.md). A dev CA and one certificate for each role
+# (web, harness, player), for TLS distribution. Never committed. A node
+# without a certificate signed by this CA cannot join the cluster.
 CERTS_DIR := deploy/certs
 
 dist-certs:
@@ -106,14 +115,10 @@ dist-certs:
 		echo "Generated CA and web/harness/player certs under $(CERTS_DIR)/"; \
 	fi
 
-# Runs the deploy integration suite against the docker-simulated player VMs
-# instead of real hardware. `mix test` on its own stays Docker-free (see
-# platform/test/test_helper.exs). Runs under `--name` (long-name
-# distribution, matching Deploy.Server's own choice for a real-IP-reachable
-# player VM) so the test node can genuinely Node.connect/1 into the
-# deployed release.
-test-deploy: deploy-keys
-	docker compose build release_builder
-	docker compose up -d --build player_vm1
+# Professor only (see DEPLOY.md). Runs the deploy integration test against the
+# simulated player_vm1. It uses a long node name (--name), like a deployed
+# release, so the test node can connect to it.
+test-deploy: deploy-keys deploy-images
+	docker compose up -d player_vm1
 	cd platform && elixir --name tester@127.0.0.1 --cookie wikirace -S mix test --only integration
 	docker compose stop player_vm1

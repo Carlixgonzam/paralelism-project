@@ -2,17 +2,17 @@ defmodule WikiRacePlatform.Race.Result do
   @moduledoc """
   The final standings for one race.
 
-  Every entry gets a single blended score, roughly 0.0-1.0, and the ranking
+  Every entry gets a single blended score, roughly 0.0 to 1.0, and the ranking
   is that score sorted descending, highest wins. Finding a path dominates
   in practice (its weight alone outweighs everything else combined), but
   two crawlers that both fail to find a path still produce a ranking:
-  found/hops/time all score zero for a non-finisher, and scheduler
+  found/first/hops/time all score zero for a non-finisher, and scheduler
   utilization is measured regardless of outcome. See `SCORING.md` for the
   published formula.
 
   One exception sits outside that blend: a crawler that ever reports a path
   the verifier rejects (structurally wrong, or claiming links that don't
-  exist) scores `-1.0` flat, overriding found/hops/time/utilization
+  exist) scores `-1.0` flat, overriding found/first/hops/time/utilization
   entirely. Honestly not finding a path (worth 0.0-0.1) always beats lying
   about finding one.
   """
@@ -29,6 +29,7 @@ defmodule WikiRacePlatform.Race.Result do
           path: Status.path() | nil,
           path_length: non_neg_integer() | nil,
           elapsed_ms: non_neg_integer() | nil,
+          first_elapsed_ms: non_neg_integer() | nil,
           visited_count: non_neg_integer(),
           error: String.t() | nil,
           utilization: float(),
@@ -139,6 +140,7 @@ defmodule WikiRacePlatform.Race.Result do
       path: player.best_path,
       path_length: player.best_path && length(player.best_path),
       elapsed_ms: player.best_elapsed_ms,
+      first_elapsed_ms: player.first_elapsed_ms,
       visited_count: player.status.visited_count,
       error: player.error,
       utilization: Map.get(utilization_by_node, player.node, 0.0),
@@ -155,27 +157,44 @@ defmodule WikiRacePlatform.Race.Result do
   # reported an unverifiable path skips this blend entirely and gets
   # `@false_path_penalty` flat, always below every honest non-finisher's
   # 0.0-0.1.
+  #
+  # First is all or nothing: 1.0 for the crawler whose first verified path
+  # arrived earliest, 0.0 for everyone else. Unlike hops and time, a crawler
+  # that also reported a false path is left out of that comparison, so it
+  # cannot take the bonus away from an honest crawler.
   defp with_score(entries) do
     finishers = Enum.filter(entries, & &1.path)
     best_hops = finishers |> Enum.map(& &1.path_length) |> min_or_nil()
     best_elapsed = finishers |> Enum.map(& &1.elapsed_ms) |> min_or_nil()
 
-    Enum.map(entries, &%{&1 | score: score(&1, best_hops, best_elapsed)})
+    first_elapsed =
+      finishers
+      |> Enum.reject(& &1.rejected?)
+      |> Enum.map(& &1.first_elapsed_ms)
+      |> min_or_nil()
+
+    best = %{hops: best_hops, elapsed: best_elapsed, first_elapsed: first_elapsed}
+    Enum.map(entries, &%{&1 | score: score(&1, best)})
   end
 
   defp min_or_nil([]), do: nil
   defp min_or_nil(list), do: Enum.min(list)
 
-  defp score(%{rejected?: true}, _best_hops, _best_elapsed), do: @false_path_penalty
+  defp score(%{rejected?: true}, _best), do: @false_path_penalty
 
-  defp score(entry, best_hops, best_elapsed) do
+  defp score(entry, best) do
     weights = Application.get_env(:wiki_race_platform, :scoring, [])[:weights] || []
 
     found_score = if entry.path, do: 1.0, else: 0.0
-    hops_score = if entry.path, do: best_hops / entry.path_length, else: 0.0
-    time_score = if entry.path, do: best_elapsed / max(entry.elapsed_ms, 1), else: 0.0
+
+    first_score =
+      if entry.path && entry.first_elapsed_ms == best.first_elapsed, do: 1.0, else: 0.0
+
+    hops_score = if entry.path, do: best.hops / entry.path_length, else: 0.0
+    time_score = if entry.path, do: best.elapsed / max(entry.elapsed_ms, 1), else: 0.0
 
     Keyword.get(weights, :found, 0) * found_score +
+      Keyword.get(weights, :first, 0) * first_score +
       Keyword.get(weights, :hops, 0) * hops_score +
       Keyword.get(weights, :time, 0) * time_score +
       Keyword.get(weights, :utilization, 0) * entry.utilization

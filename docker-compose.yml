@@ -1,24 +1,24 @@
 networks:
-  # player_vm1 and player_vm2 never share a network with each other, only
-  # (multi-homed) with kiwix1/platform/harness. Docker doesn't route between
-  # a container's own attached networks unless that container explicitly
-  # forwards packets, and neither kiwix nor platform/harness does, so this
-  # genuinely blocks a path between the two player VMs, not just discourages
-  # one. `internal: true` also cuts off all internet egress: Kiwix over HTTP
-  # and the platform over distribution, nothing else. player1/player2 (the
-  # separate dev-iteration containers, never used in a graded run) stay on
-  # the plain default network, untouched.
+  # Used only by the simulated player VMs (see DEPLOY.md). Each VM gets its own
+  # network, so player_vm1 cannot reach player_vm2. Both reach kiwix1 and
+  # platform. `internal: true` blocks internet access. player1 and player2 use
+  # the default network.
   player1_net:
     internal: true
   player2_net:
     internal: true
 
+# The images are built by the Makefile (`make up`), not by `docker compose`.
+# The builds use the network of the host, and recent versions of Docker Compose
+# refuse that unless the build gets `--allow=network.host`, which only
+# `docker buildx bake` accepts. `pull_policy: never` makes Compose use the
+# images built by `make` and never try to build or download them.
 services:
   kiwix1:
     image: ghcr.io/kiwix/kiwix-serve:latest
     volumes:
       - ./.data/zim:/data:ro
-    command: ["/data/${KIWIX_BOOK:-wikipedia_en_all_nopic}.zim"]
+    command: ["/data/${KIWIX_BOOK:-wikipedia_en_top_nopic}.zim"]
     ports:
       - "8080:8080"
     networks:
@@ -27,13 +27,12 @@ services:
       - player2_net
 
   platform:
+    image: wikirace-platform
+    pull_policy: never
     build:
       context: ./platform
-      # Some networks (this one included) filter DNS on NAT'd/bridge
-      # traffic; build steps that need the internet (deps.get, asset
-      # installers) share the host's network stack instead. Runtime
-      # container-to-container DNS (below) is unaffected, since that's
-      # Docker's own embedded resolver, not an external lookup.
+      # Some networks block DNS for Docker builds. The build uses the network
+      # of the host, so `mix deps.get` can download packages.
       network: host
     depends_on:
       - kiwix1
@@ -41,7 +40,7 @@ services:
       NODE_NAME: platform@platform
       ERL_COOKIE: wikirace
       KIWIX_BASE_URL: http://kiwix1:8080
-      KIWIX_BOOK: ${KIWIX_BOOK:-wikipedia_en_all_nopic}
+      KIWIX_BOOK: ${KIWIX_BOOK:-wikipedia_en_top_nopic}
       PORT: "4000"
     ports:
       - "4000:4000"
@@ -54,11 +53,11 @@ services:
       - player1_net
       - player2_net
 
-  # Both player services build from and mount the same source tree
-  # (player/), one starting point for two independent containers/nodes.
-  # Give one side a handicap via a runtime config knob your crawler
-  # reads, not a second copy of the code, same as RUNNING.md's manual flow.
+  # player1 and player2 both run the player/ folder, as two separate nodes.
+  # Changes in player/lib take effect after `docker compose restart player1 player2`.
   player1:
+    image: wikirace-player
+    pull_policy: never
     build:
       context: ./player
       network: host
@@ -68,13 +67,14 @@ services:
       NODE_NAME: player1@player1
       ERL_COOKIE: wikirace
       PLATFORM_NODE: platform@platform
-      START_HARNESS: "false"
     volumes:
       - ./player:/app
       - /app/_build
       - /app/deps
 
   player2:
+    image: wikirace-player
+    pull_policy: never
     build:
       context: ./player
       network: host
@@ -84,19 +84,17 @@ services:
       NODE_NAME: player2@player2
       ERL_COOKIE: wikirace
       PLATFORM_NODE: platform@platform
-      START_HARNESS: "false"
     volumes:
       - ./player:/app
       - /app/_build
       - /app/deps
 
-  # A real sshd the platform genuinely connects to, uploads a release to,
-  # and starts over Erlang's :ssh, not a mock. Distinct from player1/player2
-  # above, which are for iterating on a
-  # crawler directly; these simulate the bare, no-Elixir-installed player VM
-  # a real release gets shipped to. `deploy/keys/id_ed25519.pub` is generated
-  # by `make deploy-keys`, never committed.
+  # Professor only (see DEPLOY.md). A simulated player VM with a real sshd. The
+  # platform uploads a release to it and starts it over SSH. Not started by
+  # `make up`. `deploy/keys/id_ed25519.pub` comes from `make deploy-keys`.
   player_vm1:
+    image: wikirace-vm
+    pull_policy: never
     profiles: ["deploy"]
     build:
       context: ./deploy/vm
@@ -105,23 +103,21 @@ services:
       - ./deploy/keys/id_ed25519.pub:/home/deploy/.ssh/authorized_keys:ro
     networks:
       - player1_net
-    # A deployed release can't write anywhere on this filesystem except its
-    # own scratch space. Everything else, including the image itself, is
-    # read only. /run and /tmp are sshd's and run_erl's own scratch needs;
-    # /home/deploy/releases is where a deploy actually unpacks and runs.
+    # Read-only filesystem. Only /tmp, /run and /home/deploy/releases are
+    # writable. The release is unpacked and runs in /home/deploy/releases.
     read_only: true
     tmpfs:
       - /tmp
       - /run
-      # Docker's tmpfs mounts default to noexec; the release itself has to
-      # run from here, so that default is deliberately overridden for this
-      # one path. Everywhere else on the filesystem stays noexec and
-      # read-only.
+      # tmpfs does not allow running programs by default. The release runs
+      # from here, so this one path allows it.
       - /home/deploy/releases:exec,size=256m
     mem_limit: 512m
     cpus: 1.0
 
   player_vm2:
+    image: wikirace-vm
+    pull_policy: never
     profiles: ["deploy"]
     build:
       context: ./deploy/vm
@@ -134,25 +130,22 @@ services:
     tmpfs:
       - /tmp
       - /run
-      # Docker's tmpfs mounts default to noexec; the release itself has to
-      # run from here, so that default is deliberately overridden for this
-      # one path. Everywhere else on the filesystem stays noexec and
-      # read-only.
+      # tmpfs does not allow running programs by default. The release runs
+      # from here, so this one path allows it.
       - /home/deploy/releases:exec,size=256m
     mem_limit: 512m
     cpus: 1.0
 
-  # Builds a group's release inside a container pinned to the exact image
-  # player_vm runs on, so the result is binary-compatible regardless of what
-  # OS the platform itself happens to run on. Never started by `up`, only
-  # invoked with `docker compose run --rm release_builder ...`.
+  # Professor only (see DEPLOY.md). Builds the release of a group on the same
+  # image the player VMs use, so the release runs there. Used through
+  # `docker compose run --rm release_builder ...`, never started by `up`.
   release_builder:
+    image: wikirace-vm
+    pull_policy: never
     build:
       context: ./deploy/vm
       network: host
-    # `mix deps.get` needs real internet access, which the default bridge
-    # network's DNS filtering blocks on this network (same reason platform's
-    # build step uses host networking). This applies at `run` time too,
-    # not just build.
+    # Uses the network of the host, like the platform build, so
+    # `mix deps.get` can download packages when it runs.
     network_mode: host
     profiles: ["tools"]

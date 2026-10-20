@@ -106,6 +106,7 @@
   --color-comic-red: oklch(0.55 0.21 25);
   --color-comic-blue: oklch(0.55 0.18 250);
   --color-comic-emerald: oklch(0.55 0.16 155);
+  --color-comic-purple: oklch(0.5 0.2 300);
 }
 
 @keyframes pulseDot {

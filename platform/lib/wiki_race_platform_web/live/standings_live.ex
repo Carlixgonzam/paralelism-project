@@ -47,6 +47,12 @@ defmodule WikiRacePlatformWeb.StandingsLive do
       desc: "1.0 for a verified path, 0 for none"
     },
     %{
+      key: :first,
+      label: "First",
+      color: "bg-comic-purple",
+      desc: "1.0 for the crawler whose first verified path arrived first, 0 for the other"
+    },
+    %{
       key: :hops,
       label: "Hops",
       color: "bg-comic-blue",
