@@ -44,8 +44,8 @@ communication is the Erlang connection.
 ## Student deliverable
 
 Each group ships their crawler as an Elixir OTP application on GitHub. It must
-implement a behaviour with two functions: `start(start_url, target_url)`, which
-returns `{:ok, pid}`, and `status(pid)`, which returns the crawler's current state.
+implement a behavior with two functions: `start(start_url, target_url)`, which
+returns a pid, and `status(pid)`, which returns the crawler's current state.
 Students may use Req for HTTP and Floki for HTML parsing. All concurrency,
 distribution, and coordination must be built with standard OTP: GenServers, dynamic
 supervisors, ETS, and Erlang distribution. No other libraries for that part.
